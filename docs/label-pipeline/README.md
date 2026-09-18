@@ -10,6 +10,8 @@
 | [`00-paper-revised.md`](00-paper-revised.md) | 개정된 논문 원고 |
 | [`01-revision-notes.md`](01-revision-notes.md) | 초고 대비 변경 사항과 근거 (A: 논지 결함 / B: 스키마 누락 / C: 구조 보강 / D: 미해결) |
 | [`02-design.md`](02-design.md) | 구현 설계서. 아키텍처, 스키마, 알고리즘, 인터페이스 계약, 테스트·평가·로드맵 |
+| [`03-usecases.md`](03-usecases.md) | 유스케이스·시나리오·경계 케이스. 세부 설계의 범위 근거 |
+| [`04-backend-design.md`](04-backend-design.md) | 백엔드 세부 설계. 제어 평면 모델, 상태 머신, API 계약, 동시성·멱등성, 잡 오케스트레이션 |
 
 ## 코드 산출물
 
@@ -20,6 +22,13 @@
 | [`ddl/03_gold.sql`](ddl/03_gold.sql) | L2 합의, L3 검증, 누수 방지 뷰 |
 | [`ddl/04_meta.sql`](ddl/04_meta.sql) | 라벨러 레지스트리, 정책, 보정, 앵커, 검수 큐, 드리프트, 매니페스트 |
 | [`config/pipeline.example.yaml`](config/pipeline.example.yaml) | 파이프라인 설정 예시 |
+
+## 읽는 순서
+
+논문(`00`) → 개정 근거(`01`) → 데이터·알고리즘 설계(`02`) → 유스케이스(`03`) → 백엔드 세부
+설계(`04`). `03`은 `02`를 "누가 언제 호출하는가"로 바꿔 적고, `04`는 `03`에서 도출된
+유스케이스와 경계 케이스(EC-01~EC-22)가 요구하는 범위만 설계한다. `03`에 없는 요구는
+`04`에서 설계하지 않는다.
 
 Python 구현은 아직 포함하지 않는다. 이 저장소는 kubernetes-client 클라이언트
 라이브러리이므로, `.py` 추가 시 boilerplate 검사와 pytest 수집에 영향을 준다. 인터페이스
