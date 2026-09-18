@@ -1,0 +1,138 @@
+# =====================================================================
+# labelpipe 설정 예시
+# 설계서 02-design.md §16
+#
+# 이 파일 전체의 canon 해시가 fusion_policy.config_hash가 되고,
+# fusion_policy_ver에 반영된다. "코드는 같은데 동작이 다른" 상황을 막기 위함.
+# =====================================================================
+
+version: "0.1"
+
+storage:
+  format: delta                 # delta | iceberg (§20 O1)
+  catalog: lakehouse
+  schema: labels
+  feature_table: lakehouse.features.features_v1
+  # §5.3 — 기본값으로 두면 VACUUM이 재현성을 파괴한다. 설계 전제.
+  snapshot_retention_days: 730
+
+task:
+  label_task: disaster_risk_level
+  ontology_ver: "ont-2026.03"
+  value_type: class
+  classes: [none, low, medium, high, critical]
+  target_kind: whole            # whole | span | bbox | cell
+
+labelers:
+  - labeler_id: rule-risk-v2.1
+    method: rule
+    method_ver: rule-v2.1
+    input_spec: [text, region_code, reported_at, source_type]
+    data_egress: internal
+    enabled: true
+
+  - labeler_id: llm-primary
+    method: llm
+    # alias 금지. CI에서 날짜 고정 ID 여부를 검증한다 (§14.4).
+    method_ver: claude-opus-5-20260401
+    input_spec: [text, region_code, source_type]
+    base_model_family: claude   # 상관 보정의 사전 정보 (§7.3)
+    data_egress: external
+    params:
+      temperature: 0.0
+      top_p: 1.0
+      max_tokens: 512
+      response_format: json
+    prompt_template: prompts/disaster_risk_v3.j2
+    masking_ver: mask-v1.2
+    enabled: true
+
+  - labeler_id: llm-secondary
+    method: llm
+    method_ver: claude-sonnet-5-20260401
+    input_spec: [text, region_code, source_type]
+    base_model_family: claude   # llm-primary와 같은 계열 → 상관 보정 대상
+    data_egress: external
+    params:
+      temperature: 0.3
+      top_p: 1.0
+      max_tokens: 512
+      response_format: json
+    prompt_template: prompts/disaster_risk_v3.j2
+    masking_ver: mask-v1.2
+    enabled: true
+
+runtime:
+  max_concurrency_per_labeler: 8
+  global_tokens_per_minute: 200000
+  retry:
+    max_attempts: 4
+    backoff_seconds: [2, 4, 8, 16]
+    retry_on: [429, 500, 502, 503, 504]
+  max_cost_usd_per_run: 50.0
+  request_timeout_seconds: 60
+  cache:
+    enabled: true
+    key: [inputs_hash, method_ver, prompt_hash, params_hash]
+    # 앵커 재채점 경로에서는 항상 비활성화된다 (§12.3).
+    # 캐시가 드리프트 관측을 가리기 때문.
+
+fusion:
+  policy_kind: weighted         # majority | weighted | generative
+  theta: 0.25                   # margin 임계값
+  correlation:
+    enabled: true
+    window_days: 30
+    min_pairs: 500
+  calibration:
+    enabled: true
+    kind: isotonic              # isotonic | platt
+    n_min: 200                  # 미만이면 identity로 폴백 (부트스트랩, §8.2)
+    refit_cron: "0 3 * * 1"     # 주 1회
+    source_view: v_l3_calibration   # 불일치 기원 L3 제외 (§8.3)
+
+review:
+  budget_per_period: 500
+  # §9.1 — rho는 0으로 설정할 수 없다. CI에서 검증 (§14.4).
+  rho_random_anchor: 0.15
+  epsilon_escalation: 0.05
+  double_review_ratio: 0.20
+  priority_weights:
+    w1_uncertainty: 1.0
+    w2_class_rarity: 0.5
+    w3_downstream_impact: 0.0   # 초기 운영에서는 미사용
+    w4_review_cost: 0.3
+  holdout_pct: 20               # l3_purpose 결정론적 배정 (§4.4)
+
+anchor:
+  strata:
+    feature_quantiles: 4
+    by_predicted_class: true
+  refresh_months: 6
+  overlap_ratio: 0.30           # 직전 집합과의 중첩 (비교 가능성 유지)
+
+drift:
+  schedule_cron: "0 4 * * *"
+  psi:
+    n_bucket_min: 200
+    smoothing_epsilon: 1.0e-6
+    warn: 0.10
+    alert: 0.25
+    fdr_method: benjamini_hochberg
+  anchor_rescore:
+    fraction_per_week: 0.30     # 앵커 부분표본 순환 채점
+    cache_enabled: false        # 반드시 false (§12.3)
+  on_labeler_drift: isolate_and_republish   # none | alert | isolate_and_republish
+
+dataset:
+  include_pending: true         # §11.3 권장 기본값
+  pending_weight: 0.3
+  filter_predicate: >
+    flag IN ('agreed', 'soft_disagreement', 'human_final')
+    OR (flag = 'pending_review' AND margin >= 0.10)
+
+governance:
+  pii_masking_required_for_egress: external
+  reviewer_id_pseudonymized: true
+  # 외부 전송 라벨러를 배정할 수 없는 태스크
+  external_labeler_denylist_tasks: []
