@@ -1,0 +1,48 @@
+# 라벨 일급 객체 파이프라인 — 논문 개정본 및 구현 설계
+
+논문 *"라벨을 일급 객체로 관리하는 약지도 학습 데이터 파이프라인 설계"* 의 구현 관점 검토
+결과와, 그에 따라 개정된 원고 및 착수 가능한 설계 명세를 담는다.
+
+## 문서
+
+| 파일 | 내용 |
+|------|------|
+| [`00-paper-revised.md`](00-paper-revised.md) | 개정된 논문 원고 |
+| [`01-revision-notes.md`](01-revision-notes.md) | 초고 대비 변경 사항과 근거 (A: 논지 결함 / B: 스키마 누락 / C: 구조 보강 / D: 미해결) |
+| [`02-design.md`](02-design.md) | 구현 설계서. 아키텍처, 스키마, 알고리즘, 인터페이스 계약, 테스트·평가·로드맵 |
+
+## 코드 산출물
+
+| 경로 | 내용 |
+|------|------|
+| [`ddl/01_bronze.sql`](ddl/01_bronze.sql) | L0 원시 응답 테이블 |
+| [`ddl/02_silver.sql`](ddl/02_silver.sql) | L1 후보 라벨, 근거 분리 테이블, `v_l1_latest` |
+| [`ddl/03_gold.sql`](ddl/03_gold.sql) | L2 합의, L3 검증, 누수 방지 뷰 |
+| [`ddl/04_meta.sql`](ddl/04_meta.sql) | 라벨러 레지스트리, 정책, 보정, 앵커, 검수 큐, 드리프트, 매니페스트 |
+| [`config/pipeline.example.yaml`](config/pipeline.example.yaml) | 파이프라인 설정 예시 |
+
+Python 구현은 아직 포함하지 않는다. 이 저장소는 kubernetes-client 클라이언트
+라이브러리이므로, `.py` 추가 시 boilerplate 검사와 pytest 수집에 영향을 준다. 인터페이스
+계약은 [`02-design.md`](02-design.md) §15에 명세되어 있으며, 별도 저장소에서 그대로
+구현할 수 있다.
+
+## 초고에서 무엇이 바뀌었나 (요약)
+
+**논지 결함 8건**
+1. seed 고정 재현 주장 → 원시 응답 보존 기반 **재생(replay)** 으로 전환 (인용 [7]과의 모순 해소)
+2. Cohen's κ를 합의 판정 정책으로 나열 → 합의 정책과 모니터링 지표(Krippendorff's α) 분리
+3. 라벨러 간 비교 불가능한 신뢰도 → 앵커 기반 **단조 보정** 도입
+4. 불일치 표본 `L2 ← NULL` → 선택 편향 유발. 소프트 라벨 보존 + 매니페스트 필터로 명시 선언
+5. L3가 불일치 표본에서만 생성 → 무작위 **앵커 집합**(검수 예산 ρ 강제 배정) 도입
+6. L3의 학습/평가 역할 겸용 → `l3_purpose` 사전 분할로 누수 차단
+7. PSI 단독으로는 라벨러 드리프트와 입력 드리프트 식별 불가 → 2신호 조합 식별 규칙
+8. `agreement` 필드가 L1에 위치 → 순환 의존. L2로 이동
+
+**스키마 누락 11건** — `sample_id`, `label_task`, `target_ref`, `is_abstain`,
+`ontology_ver`, `run_id`, `value` 타입 분리, 비용·지연 필드, LLM 메타 세분화,
+`feature_snapshot_id`, L2 재현 메타
+
+**구조 보강 6건** — 일급 객체 조작적 정의, 4계층 매핑(Bronze 추가), 라벨러 상관 보정,
+데이터셋 매니페스트, 평가 계획, 정규화 해시 규격
+
+상세는 [`01-revision-notes.md`](01-revision-notes.md) 참조.
